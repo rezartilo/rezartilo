@@ -1,0 +1,14 @@
+{
+  "name": "inventora",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Inventora — data layer (types du domaine) pour la gestion de stock d'une boutique",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "example": "node --experimental-strip-types examples/box-104.ts"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}
