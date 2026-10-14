@@ -35,6 +35,7 @@ import type {
   SupplierId,
   SupplierOrder,
   SupplierOrderId,
+  SupplierOrderLineId,
   Task,
   TaskId,
   TruckId,
@@ -100,26 +101,40 @@ const rk = (code: string): Rack => racks.find((r) => r.code === code)!;
 // --- Catalogue ---------------------------------------------------------------
 
 const supplier = (id: string, name: string): Supplier => ({ id: id as SupplierId, name, ...ts });
-const suppliers = [supplier('sup_toys', 'ToyCo'), supplier('sup_home', 'Maison & Co')];
+const suppliers = [
+  supplier('sup_toys', 'ToyCo'),
+  supplier('sup_home', 'Maison & Co'),
+  supplier('sup_paper', 'Papeterie Lune'),
+  supplier('sup_deco', 'Grossiste Déco'),
+];
+const sid = (id: string) => id as SupplierId;
 
-const product = (id: string, sku: string, name: string, category: string, retailPrice: number): Product => ({
+const product = (
+  id: string,
+  sku: string,
+  name: string,
+  category: string,
+  retailPrice: number,
+  supplierId: string,
+): Product => ({
   id: id as ProductId,
   sku,
   name,
   category,
   retailPrice,
+  defaultSupplierId: supplierId as SupplierId,
   archived: false,
   ...ts,
 });
 const products = [
-  product('p_robot', 'TOY-001', 'Petit robot', 'Toys', 1290),
-  product('p_puzzle', 'TOY-002', 'Puzzle 500 pièces', 'Toys', 1590),
-  product('p_plush', 'PLU-001', 'Peluche ours', 'Plush', 1990),
-  product('p_mug_cat', 'MUG-001', 'Mug chat', 'Mugs', 990),
-  product('p_mug_logo', 'MUG-002', 'Mug Giftworks', 'Mugs', 1190),
-  product('p_candle', 'CAN-001', 'Bougie vanille', 'Candles', 1450),
-  product('p_card', 'CRD-001', 'Carte anniversaire', 'Cards', 350),
-  product('p_book', 'BOK-001', 'Carnet illustré', 'Books', 1290),
+  product('p_robot', 'TOY-001', 'Petit robot', 'Toys', 1290, 'sup_toys'),
+  product('p_puzzle', 'TOY-002', 'Puzzle 500 pièces', 'Toys', 1590, 'sup_toys'),
+  product('p_plush', 'PLU-001', 'Peluche ours', 'Plush', 1990, 'sup_toys'),
+  product('p_mug_cat', 'MUG-001', 'Mug chat', 'Mugs', 990, 'sup_home'),
+  product('p_mug_logo', 'MUG-002', 'Mug Giftworks', 'Mugs', 1190, 'sup_home'),
+  product('p_candle', 'CAN-001', 'Bougie vanille', 'Candles', 1450, 'sup_home'),
+  product('p_card', 'CRD-001', 'Carte anniversaire', 'Cards', 350, 'sup_paper'),
+  product('p_book', 'BOK-001', 'Carnet illustré', 'Books', 1290, 'sup_paper'),
 ];
 const pid = (id: string) => id as ProductId;
 
@@ -173,57 +188,79 @@ place(onRack('Rack D', 3), 'p_candle', 8);
 
 // --- Commandes fournisseurs, camion, livraisons -----------------------------
 
+const order = (
+  id: string,
+  reference: string,
+  supplierId: string,
+  status: SupplierOrder['status'],
+  lines: Array<[productId: string, quantity: number]>,
+): SupplierOrder => ({
+  id: id as SupplierOrderId,
+  shopId,
+  supplierId: sid(supplierId),
+  reference,
+  status,
+  lines: lines.map(([productId, quantityOrdered], i) => ({
+    id: `${id}_l${i + 1}` as SupplierOrderLineId,
+    productId: pid(productId),
+    quantityOrdered,
+  })),
+  orderedAt: now,
+  ...ts,
+});
+
 const orders: SupplierOrder[] = [
-  {
-    id: 'po_42' as SupplierOrderId,
-    shopId,
-    supplierId: suppliers[0]!.id,
-    reference: 'PO-2026-0042',
-    status: 'received',
-    lines: [],
-    ...ts,
-  },
-  {
-    id: 'po_43' as SupplierOrderId,
-    shopId,
-    supplierId: suppliers[1]!.id,
-    reference: 'PO-2026-0043',
-    status: 'partially_received',
-    lines: [],
-    ...ts,
-  },
+  order('po_41', 'PO-2026-0041', 'sup_deco', 'received', [
+    ['p_candle', 24],
+    ['p_mug_cat', 12],
+  ]),
+  order('po_42', 'PO-2026-0042', 'sup_toys', 'received', [
+    ['p_robot', 87],
+    ['p_puzzle', 20],
+    ['p_plush', 24],
+    ['p_mug_cat', 30],
+  ]),
+  order('po_43', 'PO-2026-0043', 'sup_home', 'partially_received', [
+    ['p_candle', 120],
+    ['p_mug_logo', 108],
+    ['p_mug_cat', 36],
+  ]),
+  order('po_44', 'PO-2026-0044', 'sup_paper', 'confirmed', [
+    ['p_card', 200],
+    ['p_book', 60],
+  ]),
 ];
+const po = (id: string) => orders.find((o) => o.id === id)!;
 
 const trucks: DeliveryTruck[] = [
   { id: 'trk_1' as TruckId, carrierName: 'Transports Martin', licensePlate: 'AB-123-CD', maxCartons: 24, ...ts },
 ];
 
+const delivery = (
+  id: string,
+  orderIds: string[],
+  status: Delivery['status'],
+  extra: Partial<Delivery> = {},
+): Delivery => ({
+  id: id as DeliveryId,
+  truckId: trucks[0]!.id,
+  shopId,
+  supplierOrderIds: orderIds.map((o) => o as SupplierOrderId),
+  status,
+  expectedAt: now,
+  arrivedAt: now,
+  ...(status === 'completed' ? { completedAt: now } : {}),
+  ...ts,
+  ...extra,
+});
+
 const deliveries: Delivery[] = [
-  {
-    id: 'dlv_7' as DeliveryId,
-    truckId: trucks[0]!.id,
-    shopId,
-    supplierOrderIds: [orders[0]!.id],
-    status: 'completed',
-    expectedAt: now,
-    arrivedAt: now,
-    completedAt: now,
-    ...ts,
-  },
-  {
-    id: 'dlv_8' as DeliveryId,
-    truckId: trucks[0]!.id,
-    shopId,
-    supplierOrderIds: [orders[1]!.id],
-    status: 'unloading',
-    driverName: 'Karim',
-    expectedAt: now,
-    arrivedAt: now,
-    announcedCartonCount: 10,
-    ...ts,
-  },
+  delivery('dlv_6', ['po_41'], 'completed'),
+  delivery('dlv_7', ['po_42'], 'completed'),
+  delivery('dlv_8', ['po_43', 'po_44'], 'unloading', { driverName: 'Karim', announcedCartonCount: 14 }),
 ];
-const [dlv7, dlv8] = deliveries as [Delivery, Delivery];
+const [dlv6, dlv7, dlv8] = deliveries as [Delivery, Delivery, Delivery];
+
 
 // --- Cartons -----------------------------------------------------------------
 
@@ -238,6 +275,7 @@ const carton = (
   location: CartonLocation,
   status: CartonStatus,
   delivery: Delivery,
+  supplierOrder: SupplierOrder,
   lines: CartonLine[],
   extra: Partial<Carton> = {},
 ): Carton => {
@@ -246,11 +284,15 @@ const carton = (
     shopId,
     code: `BOX-${cartonSeq}`,
     deliveryId: delivery.id,
-    supplierOrderId: delivery.supplierOrderIds[0]!,
+    supplierOrderId: supplierOrder.id,
     status,
     location,
     priority: 'normal',
-    lines,
+    // Chaque ligne honore la ligne de commande du même article.
+    lines: lines.map((l) => {
+      const ol = supplierOrder.lines.find((x) => x.productId === l.productId);
+      return ol ? { ...l, supplierOrderLineId: ol.id } : l;
+    }),
     ...(status !== 'in_transit' ? { receivedAt: now } : {}),
     ...ts,
     ...extra,
@@ -262,14 +304,20 @@ const inRack = (code: string, level: number): CartonLocation => ({ kind: 'backro
 const receiving: CartonLocation = { kind: 'receiving', shopId };
 const inTruck: CartonLocation = { kind: 'in_truck', deliveryId: dlv8.id };
 
-// Réserve (livraison précédente, dlv_7)
-carton(inRack('Rack A', 1), 'stored', dlv7, [line('p_robot', 24)], { contentLabel: 'Robots', grossWeight: 9800 });
-carton(inRack('Rack A', 1), 'stored', dlv7, [line('p_robot', 24)], { contentLabel: 'Robots', grossWeight: 9800 });
-carton(inRack('Rack A', 2), 'stored', dlv7, [line('p_puzzle', 20)], { contentLabel: 'Puzzles', grossWeight: 11200 });
+const po41 = po('po_41');
+const po42 = po('po_42');
+const po43 = po('po_43');
+const po44 = po('po_44');
+
+// Réserve : livraisons précédentes (dlv_6, dlv_7)
+carton(inRack('Rack A', 1), 'stored', dlv7, po42, [line('p_robot', 24)], { contentLabel: 'Robots', grossWeight: 9800 });
+carton(inRack('Rack A', 1), 'stored', dlv7, po42, [line('p_robot', 24)], { contentLabel: 'Robots', grossWeight: 9800 });
+carton(inRack('Rack A', 2), 'stored', dlv7, po42, [line('p_puzzle', 20)], { contentLabel: 'Puzzles', grossWeight: 11200 });
 const box104 = carton(
   inRack('Rack B', 2),
   'unpacking',
   dlv7,
+  po42,
   [line('p_robot', 39, 25), line('p_mug_cat', 30, 20)],
   {
     contentLabel: 'Assorted Toys & Mugs',
@@ -277,26 +325,36 @@ const box104 = carton(
     destination: onFixture('Shelf A3', 1),
   },
 );
-carton(inRack('Rack B', 1), 'stored', dlv7, [line('p_plush', 12)], { contentLabel: 'Peluches', grossWeight: 5200 });
-carton(inRack('Rack B', 1), 'stored', dlv7, [line('p_plush', 12)], { contentLabel: 'Peluches', grossWeight: 5200 });
-carton(inRack('Rack B', 3), 'stored', dlv7, [line('p_book', 30)], { contentLabel: 'Carnets', grossWeight: 12000 });
-carton(inRack('Rack D', 1), 'empty', dlv7, [line('p_card', 100, 0)], { contentLabel: 'Cartes', grossWeight: 400 });
+carton(inRack('Rack B', 1), 'stored', dlv7, po42, [line('p_plush', 12)], { contentLabel: 'Peluches', grossWeight: 5200 });
+carton(inRack('Rack B', 1), 'stored', dlv7, po42, [line('p_plush', 12)], { contentLabel: 'Peluches', grossWeight: 5200 });
+carton(inRack('Rack B', 3), 'stored', dlv8, po44, [line('p_book', 30)], { contentLabel: 'Carnets', grossWeight: 12000 });
+carton(inRack('Rack C', 1), 'stored', dlv6, po41, [line('p_candle', 24, 18)], { contentLabel: 'Bougies (lot déco)', grossWeight: 7900 });
+carton(inRack('Rack C', 2), 'stored', dlv6, po41, [line('p_mug_cat', 12)], { contentLabel: 'Mugs chat (lot déco)', grossWeight: 4400 });
+carton(inRack('Rack D', 1), 'empty', dlv8, po44, [line('p_card', 100, 0)], { contentLabel: 'Cartes', grossWeight: 400 });
 
-// Réception (livraison en cours, dlv_8)
-const box109 = carton(receiving, 'received', dlv8, [line('p_candle', 24)], { contentLabel: 'Bougies', grossWeight: 8400 });
-carton(receiving, 'received', dlv8, [line('p_candle', 24)], { contentLabel: 'Bougies', grossWeight: 8400 });
-carton(receiving, 'received', dlv8, [line('p_mug_logo', 36)], { contentLabel: 'Mugs logo', grossWeight: 13500 });
-carton(receiving, 'damaged', dlv8, [line('p_mug_cat', 36, 31)], { contentLabel: 'Mugs chat', grossWeight: 13000, priority: 'high' });
+// Réception : déjà sortis du camion (dlv_8)
+const box111 = carton(receiving, 'received', dlv8, po43, [line('p_candle', 24)], { contentLabel: 'Bougies', grossWeight: 8400 });
+carton(receiving, 'received', dlv8, po43, [line('p_candle', 24)], { contentLabel: 'Bougies', grossWeight: 8400 });
+carton(receiving, 'received', dlv8, po43, [line('p_mug_logo', 36)], { contentLabel: 'Mugs logo', grossWeight: 13500 });
+carton(receiving, 'damaged', dlv8, po43, [line('p_mug_cat', 36, 31)], { contentLabel: 'Mugs chat', grossWeight: 13000, priority: 'high' });
 
-// Encore dans le camion
-for (let i = 0; i < 6; i++) {
-  carton(inTruck, 'in_transit', dlv8, [line(i % 2 ? 'p_mug_logo' : 'p_candle', 24)], {
-    contentLabel: i % 2 ? 'Mugs logo' : 'Bougies',
-  });
+// Encore dans le camion : commandes PO-2026-0043 et PO-2026-0044
+const inTruckPlan: Array<[SupplierOrder, string, number, string]> = [
+  [po43, 'p_candle', 24, 'Bougies'],
+  [po43, 'p_candle', 24, 'Bougies'],
+  [po43, 'p_candle', 24, 'Bougies'],
+  [po43, 'p_mug_logo', 36, 'Mugs logo'],
+  [po43, 'p_mug_logo', 36, 'Mugs logo'],
+  [po44, 'p_card', 100, 'Cartes anniversaire'],
+  [po44, 'p_card', 100, 'Cartes anniversaire'],
+  [po44, 'p_book', 30, 'Carnets'],
+];
+for (const [o, productId, qty, label] of inTruckPlan) {
+  carton(inTruck, 'in_transit', dlv8, o, [line(productId, qty)], { contentLabel: label });
 }
 
 // Carton présentoir posé en expo
-carton({ kind: 'showroom', fixtureId: fx('Endcap E1').id, level: 1 }, 'stored', dlv7, [line('p_card', 50, 32)], {
+carton({ kind: 'showroom', fixtureId: fx('Endcap E1').id, level: 1 }, 'stored', dlv8, po44, [line('p_card', 50, 32)], {
   contentLabel: 'Présentoir cartes',
   grossWeight: 1800,
 });
@@ -346,7 +404,7 @@ const tasks: Task[] = [
     id: 'tsk_3' as TaskId,
     shopId,
     kind: 'move_carton',
-    cartonId: box109.id,
+    cartonId: box111.id,
     to: { kind: 'backroom', rackId: rk('Rack C').id, level: 2 },
     status: 'todo',
     priority: 'normal',

@@ -1,13 +1,19 @@
 /**
  * Scène complète : lumière, ombres douces, décor, et tout ce qui vient de la
- * base (meubles, articles, cartons, camions, personnel).
+ * base (meubles, articles, cartons, camions, personnel), plus les repères de
+ * recherche et de sélection.
  */
 import { SoftShadows } from '@react-three/drei';
-import type { InventoraDb } from '../../src/index.ts';
+import { useMemo } from 'react';
+import type { DeliveryId, InventoraDb, ProductId, RackId } from '../../src/index.ts';
+import { reserveEntries } from '../inventory/reserve.ts';
+import type { Focus, Selection } from '../ui/state.ts';
 import { Building } from './Building.tsx';
 import { Cartons } from './Cartons.tsx';
 import { Furniture } from './Furniture.tsx';
-import { MAP } from './layout.ts';
+import { MAP, placeCartons } from './layout.ts';
+import { Beacon } from './Markers.tsx';
+import { entryWorldPosition } from './positions.ts';
 import { Staff } from './Staff.tsx';
 import { StrategyCamera } from './StrategyCamera.tsx';
 import { Surroundings } from './Surroundings.tsx';
@@ -41,19 +47,51 @@ function Lights() {
   );
 }
 
-export function ShopScene({ db }: { db: InventoraDb }) {
+/** Une balise par emplacement de réserve où se trouve l'article recherché. */
+function SearchBeacons({ db, productId }: { db: InventoraDb; productId: ProductId }) {
+  const beacons = useMemo(() => {
+    const cartonPos = placeCartons(db);
+    return reserveEntries(db)
+      .filter((e) => e.productId === productId)
+      .flatMap((e) => {
+        const p = entryWorldPosition(db, e, cartonPos);
+        if (!p) return [];
+        const where = e.source.kind === 'carton' ? e.source.cartonCode : 'vrac';
+        return [{ key: `${e.source.kind}-${e.source.kind === 'carton' ? e.source.cartonId : e.source.placementId}`, p, label: `${e.quantity} · ${where}` }];
+      });
+  }, [db, productId]);
+  return (
+    <>
+      {beacons.map((b) => (
+        <Beacon key={b.key} position={b.p} label={b.label} />
+      ))}
+    </>
+  );
+}
+
+export interface ShopSceneProps {
+  db: InventoraDb;
+  selection: Selection;
+  onSelectRack: (id: RackId) => void;
+  onSelectTruck: (id: DeliveryId) => void;
+  highlightProductId: ProductId | null;
+  focus: Focus | null;
+}
+
+export function ShopScene({ db, selection, onSelectRack, onSelectTruck, highlightProductId, focus }: ShopSceneProps) {
   return (
     <>
       <color attach="background" args={['#1c212b']} />
       <SoftShadows size={18} samples={12} focus={0.6} />
       <Lights />
-      <StrategyCamera />
+      <StrategyCamera focus={focus} />
       <Surroundings />
       <Building />
-      <Furniture db={db} />
-      <Cartons db={db} />
-      <Trucks db={db} />
+      <Furniture db={db} selectedRackId={selection?.kind === 'rack' ? selection.rackId : null} onSelectRack={onSelectRack} />
+      <Cartons db={db} highlightProductId={highlightProductId} />
+      <Trucks db={db} selectedDeliveryId={selection?.kind === 'truck' ? selection.deliveryId : null} onSelectTruck={onSelectTruck} />
       <Staff db={db} />
+      {highlightProductId && <SearchBeacons db={db} productId={highlightProductId} />}
     </>
   );
 }

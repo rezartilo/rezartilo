@@ -2,7 +2,10 @@
  * Camions à quai : une livraison `arrived` ou `unloading` fait apparaître son
  * camion devant la réception, avec les cartons encore `in_truck` dans la caisse.
  */
-import type { Delivery, DeliveryTruck, InventoraDb } from '../../src/index.ts';
+import { Html } from '@react-three/drei';
+import type { ThreeEvent } from '@react-three/fiber';
+import type { Delivery, DeliveryId, DeliveryTruck, InventoraDb } from '../../src/index.ts';
+import { SelectionFrame } from './Markers.tsx';
 import { CARTON_SIZE, DOCK } from './layout.ts';
 import { InteractiveCarton } from './Cartons.tsx';
 import { Block, PALETTE, Prism, hashHue } from './lowpoly.tsx';
@@ -75,16 +78,45 @@ function TruckMesh({ truck, delivery, db }: { truck: DeliveryTruck; delivery: De
   );
 }
 
-export function Trucks({ db }: { db: InventoraDb }) {
+interface TrucksProps {
+  db: InventoraDb;
+  selectedDeliveryId: DeliveryId | null;
+  onSelectTruck: (id: DeliveryId) => void;
+}
+
+export function Trucks({ db, selectedDeliveryId, onSelectTruck }: TrucksProps) {
   const atDock = [...db.deliveries.values()].filter((d) => d.status === 'arrived' || d.status === 'unloading');
   return (
     <group>
       {atDock.map((delivery, i) => {
         const truck = db.trucks.get(delivery.truckId);
         if (!truck) return null;
+        const onBoard = [...db.cartons.values()].filter(
+          (c) => c.location.kind === 'in_truck' && c.location.deliveryId === delivery.id,
+        ).length;
+        const selected = selectedDeliveryId === delivery.id;
+        const select = (e: ThreeEvent<MouseEvent>) => {
+          if (e.delta > 4) return; // glisser = pan caméra, pas une sélection
+          e.stopPropagation();
+          onSelectTruck(delivery.id);
+        };
+        const length = CARGO.length + 2.2;
         return (
           <group key={delivery.id} position={[DOCK.x + i * 3.2, 0, DOCK.z]}>
-            <TruckMesh truck={truck} delivery={delivery} db={db} />
+            <group
+              onClick={select}
+              onPointerOver={() => (document.body.style.cursor = 'pointer')}
+              onPointerOut={() => (document.body.style.cursor = '')}
+            >
+              <TruckMesh truck={truck} delivery={delivery} db={db} />
+            </group>
+            {selected && <SelectionFrame center={[0, 0, length / 2 - 0.4]} size={[CARGO.width + 0.5, length + 0.9]} />}
+            <Html position={[0, CARGO.floor + CARGO.height + 0.9, CARGO.length / 2]} center zIndexRange={[40, 0]}>
+              <button type="button" className={`rack-tag${selected ? ' is-selected' : ''}`} onClick={() => onSelectTruck(delivery.id)}>
+                <span className="rack-tag__code">Camion</span>
+                <span className="rack-tag__qty">{onBoard} cartons</span>
+              </button>
+            </Html>
           </group>
         );
       })}

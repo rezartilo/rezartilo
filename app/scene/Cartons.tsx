@@ -4,7 +4,7 @@
  */
 import { Html } from '@react-three/drei';
 import { useMemo, useState } from 'react';
-import type { Carton, InventoraDb } from '../../src/index.ts';
+import type { Carton, InventoraDb, ProductId } from '../../src/index.ts';
 import { cartonFillRatio, cartonUnitCount, describeCartonLocation } from '../../src/index.ts';
 import { CARTON_SIZE, placeCartons, type V3 } from './layout.ts';
 import { Block, PALETTE } from './lowpoly.tsx';
@@ -56,6 +56,8 @@ function CartonCard({ db, carton }: { db: InventoraDb; carton: Carton }) {
     (t) => (t.kind === 'unpack_carton' || t.kind === 'move_carton') && t.cartonId === carton.id && t.status !== 'done',
   );
   const assignee = task?.assigneeId ? db.staff.get(task.assigneeId)?.displayName : undefined;
+  const order = carton.supplierOrderId ? db.supplierOrders.get(carton.supplierOrderId) : undefined;
+  const supplier = order ? db.suppliers.get(order.supplierId)?.name : undefined;
   const row = (k: string, v: string) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
       <span style={{ color: '#b9b2a6' }}>{k}</span>
@@ -78,6 +80,8 @@ function CartonCard({ db, carton }: { db: InventoraDb; carton: Carton }) {
     >
       <div style={{ fontWeight: 700, letterSpacing: 0.5, marginBottom: 4 }}>{carton.code}</div>
       {row('Contenu', carton.contentLabel ?? '—')}
+      {order && row('Commande', order.reference)}
+      {supplier && row('Fournisseur', supplier)}
       {carton.grossWeight !== undefined && row('Poids', `${(carton.grossWeight / 1000).toFixed(1)} kg`)}
       {row('Quantité', `${cartonUnitCount(carton)} articles`)}
       {row('Remplissage', `${fill} %`)}
@@ -92,7 +96,18 @@ function CartonCard({ db, carton }: { db: InventoraDb; carton: Carton }) {
 }
 
 /** Carton interactif : survol = surbrillance + fiche. */
-export function InteractiveCarton({ db, carton, position }: { db: InventoraDb; carton: Carton; position: V3 }) {
+export function InteractiveCarton({
+  db,
+  carton,
+  position,
+  glow = false,
+}: {
+  db: InventoraDb;
+  carton: Carton;
+  position: V3;
+  /** Surligné par la recherche. */
+  glow?: boolean;
+}) {
   const [hovered, setHovered] = useState(false);
   return (
     <group
@@ -107,7 +122,7 @@ export function InteractiveCarton({ db, carton, position }: { db: InventoraDb; c
         document.body.style.cursor = '';
       }}
     >
-      <CartonMesh carton={carton} highlighted={hovered} />
+      <CartonMesh carton={carton} highlighted={hovered || glow} />
       {hovered && (
         <Html position={[0, CARTON_SIZE[1] + 0.2, 0]} center zIndexRange={[100, 0]}>
           <CartonCard db={db} carton={carton} />
@@ -118,13 +133,16 @@ export function InteractiveCarton({ db, carton, position }: { db: InventoraDb; c
 }
 
 /** Tous les cartons présents dans la boutique (réception, réserve, expo). */
-export function Cartons({ db }: { db: InventoraDb }) {
+export function Cartons({ db, highlightProductId }: { db: InventoraDb; highlightProductId: ProductId | null }) {
   const placed = useMemo(() => placeCartons(db), [db]);
   return (
     <group>
       {[...placed].map(([id, position]) => {
         const carton = db.cartons.get(id)!;
-        return <InteractiveCarton key={id} db={db} carton={carton} position={position} />;
+        const glow =
+          highlightProductId !== null &&
+          carton.lines.some((l) => l.productId === highlightProductId && l.remainingQuantity > 0);
+        return <InteractiveCarton key={id} db={db} carton={carton} position={position} glow={glow} />;
       })}
     </group>
   );

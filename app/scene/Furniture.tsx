@@ -2,8 +2,13 @@
  * Meubles d'expo (Fixture), rayonnages de réserve (Rack) et articles en vrac
  * posés dessus (StockPlacement). Tout est dérivé de la base.
  */
-import { useMemo } from 'react';
-import type { Fixture, InventoraDb, Product, Rack, StockPlacement } from '../../src/index.ts';
+import { Html } from '@react-three/drei';
+import type { ThreeEvent } from '@react-three/fiber';
+import { useMemo, useState } from 'react';
+import type { Fixture, InventoraDb, Product, Rack, RackId, StockPlacement } from '../../src/index.ts';
+import { reserveEntries } from '../inventory/reserve.ts';
+import { SelectionFrame } from './Markers.tsx';
+import { rackTop } from './positions.ts';
 import {
   FIXTURE_DIMS,
   FIXTURE_SPOTS,
@@ -99,7 +104,7 @@ function FixtureMesh({ fixture }: { fixture: Fixture }) {
   }
 }
 
-function RackMesh({ rack }: { rack: Rack }) {
+function RackMesh({ rack, lit = false }: { rack: Rack; lit?: boolean }) {
   const { width: w, depth: d, levelGap } = RACK_DIMS;
   const levels = Array.from({ length: rack.levels }, (_, i) => rackLevelY(i + 1));
   const top = (levels.at(-1) ?? 0) + levelGap;
@@ -118,7 +123,14 @@ function RackMesh({ rack }: { rack: Rack }) {
         <group key={y}>
           <Block size={[w, 0.04, d]} position={[0, y, 0]} color="#7d6a55" />
           {[-1, 1].map((s) => (
-            <Block key={s} size={[w, 0.09, 0.05]} position={[0, y - 0.02, (s * d) / 2]} color={PALETTE.beam} />
+            <Block
+              key={s}
+              size={[w, 0.09, 0.05]}
+              position={[0, y - 0.02, (s * d) / 2]}
+              color={PALETTE.beam}
+              emissive={PALETTE.beam}
+              emissiveIntensity={lit ? 0.7 : 0}
+            />
           ))}
         </group>
       ))}
@@ -258,7 +270,73 @@ function ShelfItems({ db }: { db: InventoraDb }) {
   );
 }
 
-export function Furniture({ db }: { db: InventoraDb }) {
+/** Rayonnage cliquable, avec son étiquette « Rack B · 87 u. ». */
+function InteractiveRack({
+  rack,
+  spot,
+  units,
+  selected,
+  onSelect,
+}: {
+  rack: Rack;
+  spot: Spot;
+  units: number;
+  selected: boolean;
+  onSelect: (id: RackId) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const top = rackTop(rack.code, rack.levels);
+  const select = (e: ThreeEvent<MouseEvent>) => {
+    // Un glisser (pan de caméra) ne doit pas sélectionner.
+    if (e.delta > 4) return;
+    e.stopPropagation();
+    onSelect(rack.id);
+  };
+  return (
+    <group>
+      <group
+        onClick={select}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          setHovered(true);
+          document.body.style.cursor = 'pointer';
+        }}
+        onPointerOut={() => {
+          setHovered(false);
+          document.body.style.cursor = '';
+        }}
+      >
+        <Placed spot={spot}>
+          <RackMesh rack={rack} lit={hovered || selected} />
+        </Placed>
+      </group>
+      {selected && <SelectionFrame center={[spot.x, 0, spot.z]} size={[RACK_DIMS.width + 0.3, RACK_DIMS.depth + 0.3]} rotY={spot.rotY} />}
+      {top && (
+        <Html position={top} center zIndexRange={[40, 0]}>
+          <button type="button" className={`rack-tag${selected ? ' is-selected' : ''}`} onClick={() => onSelect(rack.id)}>
+            <span className="rack-tag__code">{rack.code}</span>
+            <span className="rack-tag__qty">{units} u.</span>
+          </button>
+        </Html>
+      )}
+    </group>
+  );
+}
+
+interface FurnitureProps {
+  db: InventoraDb;
+  selectedRackId: RackId | null;
+  onSelectRack: (id: RackId) => void;
+}
+
+export function Furniture({ db, selectedRackId, onSelectRack }: FurnitureProps) {
+  const rackUnits = useMemo(() => {
+    const m = new Map<RackId, number>();
+    for (const e of reserveEntries(db)) {
+      if (e.place.kind === 'rack') m.set(e.place.rackId, (m.get(e.place.rackId) ?? 0) + e.quantity);
+    }
+    return m;
+  }, [db]);
   return (
     <group>
       {[...db.fixtures.values()].map((f) => {
@@ -272,9 +350,14 @@ export function Furniture({ db }: { db: InventoraDb }) {
       {[...db.racks.values()].map((r) => {
         const spot = RACK_SPOTS[r.code];
         return spot ? (
-          <Placed key={r.id} spot={spot}>
-            <RackMesh rack={r} />
-          </Placed>
+          <InteractiveRack
+            key={r.id}
+            rack={r}
+            spot={spot}
+            units={rackUnits.get(r.id) ?? 0}
+            selected={selectedRackId === r.id}
+            onSelect={onSelectRack}
+          />
         ) : null;
       })}
       <ShelfItems db={db} />

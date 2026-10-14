@@ -6,11 +6,14 @@
  *  - pas de rotation
  *  - limites : la zone visible au sol ne sort jamais de la carte, et le zoom
  *    arrière minimal est recalculé pour que la vue tienne dans la carte.
+ *  - `focus` : glisse en douceur vers un point (résultat de recherche) ; toute
+ *    action de l'utilisateur annule le déplacement en cours.
  */
 import { MapControls, OrthographicCamera } from '@react-three/drei';
-import { useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { useCallback, useEffect, useRef, type ComponentRef } from 'react';
 import { MathUtils, type OrthographicCamera as OrthoCam } from 'three';
+import type { Focus } from '../ui/state.ts';
 import { MAP } from './layout.ts';
 
 /** Direction caméra → cible : isométrique vraie (élévation ≈ 35,26°). */
@@ -31,8 +34,9 @@ function groundHalfExtent(cam: OrthoCam): number {
   return (halfW + Math.sqrt(3) * halfH) / Math.SQRT2;
 }
 
-export function StrategyCamera() {
+export function StrategyCamera({ focus }: { focus: Focus | null }) {
   const controls = useRef<ComponentRef<typeof MapControls>>(null);
+  const goal = useRef<{ x: number; z: number; zoom: number | undefined } | null>(null);
   const size = useThree((s) => s.size);
 
   // Zoom arrière minimal : toute la vue doit tenir dans la carte. Passé en prop
@@ -76,6 +80,40 @@ export function StrategyCamera() {
     clampToMap();
   }, [minZoom, clampToMap]);
 
+  // Stable : drei reconnecte les contrôles quand ce callback change.
+  const cancelGoal = useCallback(() => {
+    goal.current = null;
+  }, []);
+
+  // Nouvelle demande de recentrage.
+  useEffect(() => {
+    if (focus) goal.current = { x: focus.point[0], z: focus.point[2], zoom: focus.zoom };
+  }, [focus]);
+
+  // Glissement amorti vers le point demandé (cible et caméra bougent ensemble).
+  useFrame((_, dt) => {
+    const g = goal.current;
+    const c = controls.current;
+    if (!g || !c) return;
+    const cam = c.object as OrthoCam;
+    const k = 1 - Math.exp(-dt * 6);
+    const dx = (g.x - c.target.x) * k;
+    const dz = (g.z - c.target.z) * k;
+    c.target.x += dx;
+    c.target.z += dz;
+    cam.position.x += dx;
+    cam.position.z += dz;
+    let dZoom = 0;
+    if (g.zoom !== undefined) {
+      dZoom = (MathUtils.clamp(g.zoom, minZoom, maxZoom) - cam.zoom) * k;
+      cam.zoom += dZoom;
+      cam.updateProjectionMatrix();
+    }
+    clampToMap();
+    // Arrivé (ou bloqué par les limites de la carte) : on s'arrête.
+    if (Math.abs(dx) < 1e-3 && Math.abs(dz) < 1e-3 && Math.abs(dZoom) < 1e-2) goal.current = null;
+  });
+
   const n = Math.hypot(...ISO_DIR);
   const pos: [number, number, number] = [
     START_TARGET[0] + (ISO_DIR[0] / n) * DISTANCE,
@@ -100,6 +138,7 @@ export function StrategyCamera() {
         minZoom={minZoom}
         maxZoom={maxZoom}
         onChange={clampToMap}
+        onStart={cancelGoal}
       />
     </>
   );
