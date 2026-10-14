@@ -2,6 +2,8 @@
 
 Data layer uniquement (pas d'UI). Les types se trouvent dans `src/domain/`, la forme de la base dans `src/data/schema.ts`.
 
+> **Périmètre des commandes** : dans Inventora, « commandes » désigne uniquement les **commandes fournisseurs** (réapprovisionnement de la boutique, `SupplierOrder`). Il n'y a pas de commandes clients. Les ventes en boutique ne sont tracées que comme mouvements de stock (`units_sold`).
+
 ## Relations
 
 ```mermaid
